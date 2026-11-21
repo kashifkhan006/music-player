@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Music player with playlist, shuffle, repeat, visualizer and local file upload. Built for CodeAlpha.">
+<title>Music Player | CodeAlpha</title>
+<style>
+:root{--bg:#1b1424;--card:#271d35;--ink:#f4eefb;--mute:#a899bd;--acc:#f2a33a;--line:#ffffff1f;--h1:#f2a33a;--h2:#c9553d}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 30% 10%,#3a2752,var(--bg) 60%);color:var(--ink);font-family:"Trebuchet MS",system-ui,sans-serif;padding:16px}
+.player{width:min(400px,100%);background:var(--card);border-radius:26px;padding:24px;box-shadow:0 24px 60px #0008}
+.art{width:180px;height:180px;margin:0 auto 14px;border-radius:50%;background:conic-gradient(var(--h1),var(--h2),#6b3fa0,var(--h1));display:grid;place-items:center;animation:spin 9s linear infinite paused;box-shadow:0 10px 30px #0006}
+.art::after{content:"";width:46px;height:46px;border-radius:50%;background:var(--card)}
+.playing .art{animation-play-state:running}@keyframes spin{to{transform:rotate(360deg)}}
+canvas{display:block;width:100%;height:46px;margin-bottom:10px}
+h1{font-size:21px;margin:0;text-align:center}#artist{text-align:center;color:var(--mute);margin:4px 0 14px}
+input[type=range]{width:100%;accent-color:var(--acc);cursor:pointer}
+.time{display:flex;justify-content:space-between;font-size:13px;color:var(--mute)}
+.ctl{display:flex;justify-content:center;align-items:center;gap:10px;margin:10px 0}
+button{border:0;background:none;color:var(--mute);font-size:20px;cursor:pointer;border-radius:50%;width:42px;height:42px;transition:transform .15s,color .15s}
+button:hover{transform:scale(1.12);color:var(--ink)}button:focus-visible,input:focus-visible,li:focus-visible,select:focus-visible{outline:3px solid var(--acc)}
+button.on{color:var(--acc)}
+#play{background:var(--acc);color:#231a2e;width:58px;height:58px;font-size:24px}
+.row{display:flex;align-items:center;gap:10px}.row button{width:32px;height:32px;font-size:17px}
+select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:4px}
+ul{list-style:none;padding:0;margin:14px 0 0;border-top:1px solid var(--line);max-height:180px;overflow:auto}
+li{display:flex;justify-content:space-between;gap:8px;padding:9px 8px;cursor:pointer;border-radius:8px;font-size:15px}
+li:hover{background:#ffffff12}li.cur{color:var(--acc)}li small{color:var(--mute)}
+.add{display:block;text-align:center;margin-top:12px;padding:9px;border:1px dashed var(--mute);border-radius:12px;color:var(--mute);cursor:pointer;font-size:14px}
+.add:hover{color:var(--acc);border-color:var(--acc)}#msg{font-size:13px;color:var(--mute);text-align:center;min-height:18px;margin-top:8px}
+</style></head><body>
+<main class="player" id="p">
+<div class="art"></div><canvas id="cv" width="360" height="46" aria-hidden="true"></canvas>
+<h1 id="title">Song title</h1><p id="artist">Artist</p>
+<input type="range" id="bar" value="0" min="0" max="100" step="0.1" aria-label="Seek">
+<div class="time"><span id="cur">0:00</span><span id="dur">0:00</span></div>
+<div class="ctl"><button id="shuf" title="Shuffle" aria-label="Shuffle">⤮</button><button id="prev" aria-label="Previous">⏮</button><button id="play" aria-label="Play">▶</button><button id="next" aria-label="Next">⏭</button><button id="rep" title="Repeat" aria-label="Repeat">↻</button></div>
+<div class="row"><button id="mute" aria-label="Mute">🔊</button><input type="range" id="vol" min="0" max="1" step="0.01" value="0.7" aria-label="Volume">
+<select id="spd" aria-label="Speed"><option value="0.75">0.75x</option><option value="1" selected>1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option></select></div>
+<ul id="list"></ul>
+<label class="add">+ Add songs from your device<input type="file" id="file" accept="audio/*" multiple hidden></label>
+<div id="msg" role="status">Space: play/pause · ←/→: previous/next</div>
+<audio id="a" preload="metadata"></audio>
+</main>
+<script>
+// Replace src with your own files, e.g. "songs/track1.mp3", or add songs with the button.
+const songs=[
+{title:"Sunrise Drive",artist:"SoundHelix",src:"https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",h:[38,20]},
+{title:"Night Signal",artist:"SoundHelix",src:"https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",h:[200,280]},
+{title:"Paper Planes",artist:"SoundHelix",src:"https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",h:[160,330]}];
+const $=id=>document.getElementById(id),a=$("a"),cv=$("cv"),g=cv.getContext("2d");
+let i=0,shuffle=false,repeat=0,ac,an,data,local=false; // repeat: 0 off, 1 all, 2 one
+const t=s=>isFinite(s)?Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0"):"0:00";
+const msg=m=>{$("msg").textContent=m};
+function render(){$("list").innerHTML=songs.map((s,n)=>`<li tabindex="0" data-n="${n}" class="${n===i?"cur":""}"><span>${s.title} <small>${s.artist}</small></span><small>${s.d||""}</small></li>`).join("")}
+function load(n,play){i=(n+songs.length)%songs.length;const s=songs[i];local=!!s.local;a.src=s.src;$("title").textContent=s.title;$("artist").textContent=s.artist;
+ $("bar").value=0;$("cur").textContent="0:00";$("dur").textContent="0:00";
+ document.documentElement.style.setProperty("--h1","hsl("+s.h[0]+" 85% 60%)");document.documentElement.style.setProperty("--h2","hsl("+s.h[1]+" 70% 50%)");
+ render();if("mediaSession"in navigator)navigator.mediaSession.metadata=new MediaMetadata({title:s.title,artist:s.artist});
+ if(play)a.play().catch(()=>msg("Tap play to start (browser blocked autoplay)."))}
+function pick(dir){if(shuffle&&songs.length>1){let n;do n=Math.floor(Math.random()*songs.length);while(n===i);return n}return i+dir}
+$("play").onclick=()=>a.paused?a.play().catch(()=>msg("Could not play this file.")):a.pause();
+$("next").onclick=()=>load(pick(1),true);$("prev").onclick=()=>a.currentTime>3?a.currentTime=0:load(pick(-1),true);
+$("shuf").onclick=e=>{shuffle=!shuffle;e.currentTarget.classList.toggle("on",shuffle)};
+$("rep").onclick=e=>{repeat=(repeat+1)%3;e.currentTarget.classList.toggle("on",repeat>0);e.currentTarget.textContent=repeat===2?"🔂":"↻";msg(["Repeat off","Repeat all","Repeat one"][repeat])};
+a.onplay=()=>{$("play").textContent="⏸";$("p").classList.add("playing");draw()};
+a.onpause=()=>{$("play").textContent="▶";$("p").classList.remove("playing")};
+a.onloadedmetadata=()=>{$("dur").textContent=t(a.duration);songs[i].d=t(a.duration);render()};
+a.ontimeupdate=()=>{if(a.duration){$("bar").value=a.currentTime/a.duration*100;$("cur").textContent=t(a.currentTime)}};
+a.onended=()=>{if(repeat===2){a.currentTime=0;a.play()}else if(i===songs.length-1&&repeat===0&&!shuffle)a.pause();else load(pick(1),true)};
+a.onerror=()=>msg("This song failed to load. Check the file path or your connection.");
+$("bar").oninput=e=>{if(a.duration)a.currentTime=e.target.value/100*a.duration};
+$("vol").oninput=e=>{a.volume=e.target.value;a.muted=false;$("mute").textContent=a.volume==0?"🔇":"🔊";try{localStorage.setItem("ca-vol",a.volume)}catch(x){}};
+$("mute").onclick=()=>{a.muted=!a.muted;$("mute").textContent=a.muted?"🔇":"🔊"};
+$("spd").onchange=e=>a.playbackRate=+e.target.value;
+$("list").onclick=e=>{const l=e.target.closest("li");if(l)load(+l.dataset.n,true)};
+$("list").onkeydown=e=>{if(e.key==="Enter"){const l=e.target.closest("li");if(l)load(+l.dataset.n,true)}};
+$("file").onchange=e=>{const f=[...e.target.files];f.forEach((x,n)=>songs.push({title:x.name.replace(/\.[^.]+$/,""),artist:"Local file",src:URL.createObjectURL(x),local:true,h:[Math.random()*360|0,Math.random()*360|0]}));
+ if(f.length){load(songs.length-f.length,true);msg(f.length+" song(s) added")}};
+// visualizer: real audio data for local files, animated bars for streamed ones
+function setupAudio(){if(ac)return;try{ac=new(window.AudioContext||window.webkitAudioContext)();an=ac.createAnalyser();an.fftSize=64;ac.createMediaElementSource(a).connect(an);an.connect(ac.destination);data=new Uint8Array(an.frequencyBinCount)}catch(e){ac=null}}
+function draw(){if(a.paused){g.clearRect(0,0,cv.width,cv.height);return}
+ g.clearRect(0,0,cv.width,cv.height);const n=32,w=cv.width/n;
+ if(local){setupAudio();if(ac&&ac.state==="suspended")ac.resume()}
+ if(local&&an)an.getByteFrequencyData(data);
+ g.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--h1");
+ for(let k=0;k<n;k++){const v=local&&an?data[k]/255:.25+.75*Math.abs(Math.sin(Date.now()/280+k*.55))*Math.abs(Math.sin(Date.now()/900+k));
+  const h=Math.max(3,v*cv.height);g.fillRect(k*w+2,cv.height-h,w-4,h)}
+ requestAnimationFrame(draw)}
+document.addEventListener("keydown",e=>{if(["INPUT","SELECT"].includes(e.target.tagName))return;
+ if(e.code==="Space"){e.preventDefault();$("play").click()}if(e.key==="ArrowRight")$("next").click();if(e.key==="ArrowLeft")$("prev").click()});
+if("mediaSession"in navigator){const m=navigator.mediaSession;m.setActionHandler("play",()=>a.play());m.setActionHandler("pause",()=>a.pause());m.setActionHandler("nexttrack",()=>$("next").click());m.setActionHandler("previoustrack",()=>$("prev").click())}
+let v=.7;try{v=+(localStorage.getItem("ca-vol")??.7)}catch(e){}a.volume=v;$("vol").value=v;
+load(0,false);
+</script></body></html>
